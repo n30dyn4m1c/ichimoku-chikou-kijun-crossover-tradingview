@@ -1,0 +1,66 @@
+//@version=6
+indicator("Chikou × Historical Kijun (closed-bar)", overlay=true)
+
+// Inputs
+lenTenkan = input.int(9,  "Tenkan", minval=1)
+lenKijun  = input.int(26, "Kijun (Chikou offset)", minval=1)
+lenSenkou = input.int(52, "Senkou", minval=1)
+useAlerts = input.bool(true,  "Enable alert() popups")
+showCloud = input.bool(true,  "Plot Ichimoku context")
+showDebug = input.bool(false, "Show debug values")
+epsilon   = input.float(0.0,  "Epsilon filter (pts)", minval=0.0)
+
+// Ichimoku Lines
+float tenkan = (ta.highest(high, lenTenkan) + ta.lowest(low, lenTenkan)) / 2.0
+float kijun  = (ta.highest(high, lenKijun)  + ta.lowest(low, lenKijun))  / 2.0
+float spanA  = (tenkan + kijun) / 2.0
+float spanB  = (ta.highest(high, lenSenkou) + ta.lowest(low, lenSenkou)) / 2.0
+
+// Display toggle for plots (no local-scope plotting)
+disp = showCloud ? display.all : display.none
+pTenkan = plot(tenkan, color=color.aqua,    title="Tenkan", display=disp)
+pKijun  = plot(kijun,  color=color.fuchsia, title="Kijun",  display=disp)
+pChikou = plot(close,  color=color.lime,    title="Chikou (value)", offset=-lenKijun, display=disp)
+pSpanA  = plot(spanA,  color=color.new(color.green,  0), title="Senkou A", offset=lenKijun, display=disp)
+pSpanB  = plot(spanB,  color=color.new(color.purple, 0), title="Senkou B", offset=lenKijun, display=disp)
+fill(pSpanA, pSpanB, color=spanA >= spanB ? color.new(color.green, 80) : color.new(color.purple, 80))
+
+// Bars required so kijun[lenKijun+{1,2}] existed and were computed
+bool haveBars = bar_index >= (2 * lenKijun + 2)
+
+// Historical alignment (closed bars only)
+float chikou_now  = na
+float chikou_prev = na
+float kijun_now   = na
+float kijun_prev  = na
+if haveBars
+    chikou_now  := close[1]                 // Chikou value printed lenKijun bars back
+    chikou_prev := close[2]
+    kijun_now   := kijun[lenKijun + 1]      // Kijun on the bar aligned with chikou_now
+    kijun_prev  := kijun[lenKijun + 2]      // Kijun on the bar aligned with chikou_prev
+
+// Cross detection with epsilon snapped to tick
+float eps = math.round(epsilon / syminfo.mintick) * syminfo.mintick
+bool bull = haveBars and barstate.isconfirmed and (chikou_prev <= kijun_prev + eps) and (chikou_now > kijun_now + eps)
+bool bear = haveBars and barstate.isconfirmed and (chikou_prev >= kijun_prev - eps) and (chikou_now < kijun_now - eps)
+
+// Signals & Alerts
+plotshape(bull, title="Bullish Chikou×Kijun", style=shape.triangleup,   location=location.belowbar, color=color.lime, size=size.tiny, text="CK↑")
+plotshape(bear, title="Bearish Chikou×Kijun", style=shape.triangledown, location=location.abovebar,  color=color.red,  size=size.tiny, text="CK↓")
+
+alertcondition(bull, title="Bullish: Chikou crosses above historical Kijun", message="{{ticker}} {{interval}} Bullish Chikou×Kijun on closed bar @ {{close}}")
+alertcondition(bear, title="Bearish: Chikou crosses below historical Kijun", message="{{ticker}} {{interval}} Bearish Chikou×Kijun on closed bar @ {{close}}")
+
+if useAlerts and (bull or bear)
+    alert((bull ? "Bullish" : "Bearish") + " Chikou×Kijun on closed bar")
+
+// Debug table
+if showDebug
+    var table t = table.new(position.top_right, 1, 7)
+    table.cell(t, 0, 0, "ch_prev=" + str.tostring(chikou_prev))
+    table.cell(t, 0, 1, "ch_now="  + str.tostring(chikou_now))
+    table.cell(t, 0, 2, "kj_prev=" + str.tostring(kijun_prev))
+    table.cell(t, 0, 3, "kj_now="  + str.tostring(kijun_now))
+    table.cell(t, 0, 4, "bull="    + str.tostring(bull))
+    table.cell(t, 0, 5, "bear="    + str.tostring(bear))
+    table.cell(t, 0, 6, "barsOK="  + str.tostring(haveBars))
